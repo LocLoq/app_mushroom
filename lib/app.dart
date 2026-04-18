@@ -53,6 +53,7 @@ class _MushroomHomePageState extends State<MushroomHomePage> {
   bool _isPreparing = false;
   bool _isSubmittingJob = false;
   bool _isReconnectingWs = false;
+  bool _isDisconnectingWs = false;
   bool _wsConnected = false;
   String? _error;
 
@@ -62,7 +63,7 @@ class _MushroomHomePageState extends State<MushroomHomePage> {
     _backendUrlController = TextEditingController(
       text: _queueSocket.backendBaseUrl,
     );
-    _eventSubscription = _queueSocket.connect().listen((event) {
+    _eventSubscription = _queueSocket.events.listen((event) {
       if (!mounted) {
         return;
       }
@@ -79,6 +80,39 @@ class _MushroomHomePageState extends State<MushroomHomePage> {
         }
       });
     });
+  }
+
+  Future<void> _disconnectWebSocket() async {
+    setState(() {
+      _isDisconnectingWs = true;
+      _error = null;
+    });
+
+    try {
+      await _queueSocket.disconnect();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _wsConnected = false;
+      });
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Đã ngắt kết nối WebSocket.')));
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _error = 'Không thể ngắt kết nối WebSocket: $e';
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isDisconnectingWs = false;
+        });
+      }
+    }
   }
 
   @override
@@ -258,12 +292,22 @@ class _MushroomHomePageState extends State<MushroomHomePage> {
                   const SizedBox(height: 12),
                   TextField(
                     controller: _backendUrlController,
+                    enabled:
+                        !_wsConnected && !_isReconnectingWs && !_isDisconnectingWs,
                     decoration: const InputDecoration(
                       border: OutlineInputBorder(),
                       labelText: 'Backend URL',
                       hintText: 'http://10.0.2.2:8000',
                     ),
                   ),
+                  if (_wsConnected)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 8),
+                      child: Text(
+                        'Ngắt kết nối trước khi thay đổi IP/URL backend.',
+                        style: TextStyle(fontSize: 12),
+                      ),
+                    ),
                   const SizedBox(height: 8),
                   Wrap(
                     spacing: 12,
@@ -271,14 +315,25 @@ class _MushroomHomePageState extends State<MushroomHomePage> {
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
                       FilledButton.icon(
-                        onPressed: _isReconnectingWs
+                        onPressed: _isReconnectingWs || _isDisconnectingWs
                             ? null
                             : _reconnectWebSocket,
                         icon: const Icon(Icons.link_outlined),
-                        label: const Text('Áp dụng & kết nối WS'),
+                        label: Text(
+                          _wsConnected
+                              ? 'Áp dụng URL mới & kết nối lại WS'
+                              : 'Kết nối WebSocket',
+                        ),
                       ),
                       OutlinedButton.icon(
-                        onPressed: _queueSocket.sendPing,
+                        onPressed: _wsConnected && !_isDisconnectingWs
+                            ? _disconnectWebSocket
+                            : null,
+                        icon: const Icon(Icons.link_off_outlined),
+                        label: const Text('Disconnect'),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: _wsConnected ? _queueSocket.sendPing : null,
                         icon: const Icon(Icons.wifi_tethering_outlined),
                         label: const Text('Ping WebSocket'),
                       ),
@@ -624,21 +679,23 @@ class BackendQueueService {
   Timer? _reconnectTimer;
   bool _wsConnected = false;
   bool _pollStarted = false;
+  bool _autoReconnectEnabled = false;
   bool _disposed = false;
 
   String get backendBaseUrl => _backendBaseUrl;
   bool get isWebSocketConnected => _wsConnected;
+  Stream<QueueEvent> get events => _controller.stream;
 
   Stream<QueueEvent> connect() {
     if (_disposed) {
       throw StateError('BackendQueueService đã dispose');
     }
+    _autoReconnectEnabled = true;
     scheduleMicrotask(() {
       unawaited(_connectWebSocket());
     });
     if (!_pollStarted) {
       _startPolling();
-      _pollStarted = true;
     }
     return _controller.stream;
   }
@@ -647,6 +704,8 @@ class BackendQueueService {
     if (_disposed) {
       throw StateError('BackendQueueService đã dispose');
     }
+
+    _autoReconnectEnabled = true;
 
     if (baseUrl != null && baseUrl.trim().isNotEmpty) {
       _backendBaseUrl = _normalizeBaseUrl(baseUrl);
@@ -657,8 +716,19 @@ class BackendQueueService {
     await _connectWebSocket();
     if (!_pollStarted) {
       _startPolling();
-      _pollStarted = true;
     }
+  }
+
+  Future<void> disconnect() async {
+    if (_disposed) {
+      throw StateError('BackendQueueService đã dispose');
+    }
+
+    _autoReconnectEnabled = false;
+    _reconnectTimer?.cancel();
+    _stopPolling();
+    await _disconnectWebSocket();
+    _emit('ws.closed', {'reason': 'manual_disconnect'});
   }
 
   List<QueueJob> get jobs {
@@ -757,7 +827,6 @@ class BackendQueueService {
     final channel = _channel;
     if (channel == null || !_wsConnected) {
       _emit('ws.error', {'message': 'WebSocket chưa kết nối'});
-      unawaited(_connectWebSocket());
       return;
     }
 
@@ -766,11 +835,11 @@ class BackendQueueService {
     } on StateError catch (error) {
       _wsConnected = false;
       _emit('ws.error', {'message': 'WebSocket đã đóng: $error'});
-      unawaited(_connectWebSocket());
+      _scheduleReconnect();
     } catch (error) {
       _wsConnected = false;
       _emit('ws.error', {'message': 'Không gửi được ping: $error'});
-      unawaited(_connectWebSocket());
+      _scheduleReconnect();
     }
   }
 
@@ -808,7 +877,7 @@ class BackendQueueService {
   }
 
   void _scheduleReconnect() {
-    if (_disposed) {
+    if (_disposed || !_autoReconnectEnabled) {
       return;
     }
 
@@ -840,6 +909,13 @@ class BackendQueueService {
     _pollTimer = Timer.periodic(const Duration(seconds: 2), (_) {
       unawaited(_pollActiveJobs());
     });
+    _pollStarted = true;
+  }
+
+  void _stopPolling() {
+    _pollTimer?.cancel();
+    _pollTimer = null;
+    _pollStarted = false;
   }
 
   Future<void> _pollActiveJobs() async {
@@ -1175,7 +1251,8 @@ class BackendQueueService {
 
   void dispose() {
     _disposed = true;
-    _pollTimer?.cancel();
+    _autoReconnectEnabled = false;
+    _stopPolling();
     _reconnectTimer?.cancel();
     unawaited(_disconnectWebSocket());
     _httpClient.close();

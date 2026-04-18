@@ -21,7 +21,9 @@ App Flutter cho bài toán nhận diện nấm, gọi trực tiếp backend theo
 ## Cấu hình backend
 
 - Chạy backend FastAPI trước (file tham chiếu: `server.py`).
-- Trong app, nhập URL backend tại ô **Backend URL** và bấm **Áp dụng & kết nối WS**.
+- Khi mở app, trạng thái mặc định là **WS: disconnected** (không tự kết nối).
+- Trong app, nhập URL backend tại ô **Backend URL** rồi bấm **Kết nối WebSocket**.
+- Muốn đổi IP/URL backend: bấm **Disconnect** trước, sau đó sửa URL và kết nối lại.
 - Ví dụ:
 	- Android emulator: `http://10.0.2.2:8000`
 	- iOS simulator: `http://127.0.0.1:8000`
