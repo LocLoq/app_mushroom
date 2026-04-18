@@ -13,8 +13,7 @@ import 'package:video_player/video_player.dart';
 import 'package:video_thumbnail/video_thumbnail.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
-const String kBackendIp = '192.168.1.100';
-const int kBackendPort = 8000;
+const String kDefaultBackendBaseUrl = 'http://10.0.2.2:8000';
 
 class MushroomRecognizerApp extends StatelessWidget {
   const MushroomRecognizerApp({super.key});
@@ -42,7 +41,10 @@ class MushroomHomePage extends StatefulWidget {
 class _MushroomHomePageState extends State<MushroomHomePage> {
   final ImagePicker _picker = ImagePicker();
   final FrameSelectorService _frameSelector = FrameSelectorService();
-  final BackendQueueService _queueSocket = BackendQueueService();
+  final BackendQueueService _queueSocket = BackendQueueService(
+    initialBackendBaseUrl: kDefaultBackendBaseUrl,
+  );
+  late final TextEditingController _backendUrlController;
 
   StreamSubscription<QueueEvent>? _eventSubscription;
   final List<QueueEvent> _events = [];
@@ -50,16 +52,27 @@ class _MushroomHomePageState extends State<MushroomHomePage> {
   PreparedFrame? _preparedFrame;
   bool _isPreparing = false;
   bool _isSubmittingJob = false;
+  bool _isReconnectingWs = false;
+  bool _wsConnected = false;
   String? _error;
 
   @override
   void initState() {
     super.initState();
+    _backendUrlController = TextEditingController(
+      text: _queueSocket.backendBaseUrl,
+    );
     _eventSubscription = _queueSocket.connect().listen((event) {
       if (!mounted) {
         return;
       }
       setState(() {
+        if (event.event == 'ws.connected') {
+          _wsConnected = true;
+        }
+        if (event.event == 'ws.closed' || event.event == 'ws.error') {
+          _wsConnected = false;
+        }
         _events.insert(0, event);
         if (_events.length > 60) {
           _events.removeRange(60, _events.length);
@@ -71,8 +84,49 @@ class _MushroomHomePageState extends State<MushroomHomePage> {
   @override
   void dispose() {
     _eventSubscription?.cancel();
+    _backendUrlController.dispose();
     _queueSocket.dispose();
     super.dispose();
+  }
+
+  Future<void> _reconnectWebSocket() async {
+    final input = _backendUrlController.text.trim();
+    if (input.isEmpty) {
+      setState(() {
+        _error = 'Hãy nhập backend URL trước khi kết nối.';
+      });
+      return;
+    }
+
+    setState(() {
+      _isReconnectingWs = true;
+      _error = null;
+    });
+
+    try {
+      await _queueSocket.reconnect(baseUrl: input);
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Đã cập nhật backend: ${_queueSocket.backendBaseUrl}'),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _error = 'Không thể kết nối WebSocket: $e';
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isReconnectingWs = false;
+        });
+      }
+    }
   }
 
   Future<void> _prepareFromImageGallery() async {
@@ -184,12 +238,71 @@ class _MushroomHomePageState extends State<MushroomHomePage> {
   @override
   Widget build(BuildContext context) {
     final jobs = _queueSocket.jobs;
+    final backendBaseUrl = _queueSocket.backendBaseUrl;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Nhận diện nấm (Backend thật)')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Kết nối backend',
+                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _backendUrlController,
+                    decoration: const InputDecoration(
+                      border: OutlineInputBorder(),
+                      labelText: 'Backend URL',
+                      hintText: 'http://10.0.2.2:8000',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      FilledButton.icon(
+                        onPressed: _isReconnectingWs
+                            ? null
+                            : _reconnectWebSocket,
+                        icon: const Icon(Icons.link_outlined),
+                        label: const Text('Áp dụng & kết nối WS'),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: _queueSocket.sendPing,
+                        icon: const Icon(Icons.wifi_tethering_outlined),
+                        label: const Text('Ping WebSocket'),
+                      ),
+                      Text(
+                        _wsConnected ? 'WS: connected' : 'WS: disconnected',
+                        style: TextStyle(
+                          color: _wsConnected
+                              ? Colors.green.shade700
+                              : Colors.red.shade700,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'HTTP: $backendBaseUrl',
+                    style: const TextStyle(fontWeight: FontWeight.w500),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
           Card(
             child: Padding(
               padding: const EdgeInsets.all(16),
@@ -211,15 +324,6 @@ class _MushroomHomePageState extends State<MushroomHomePage> {
                     onPressed: _isPreparing ? null : _prepareFromCameraVideo,
                     icon: const Icon(Icons.videocam_outlined),
                     label: const Text('Quay video'),
-                  ),
-                  OutlinedButton.icon(
-                    onPressed: _queueSocket.sendPing,
-                    icon: const Icon(Icons.wifi_tethering_outlined),
-                    label: const Text('Ping WebSocket'),
-                  ),
-                  Text(
-                    'Backend: http://$kBackendIp:$kBackendPort',
-                    style: const TextStyle(fontWeight: FontWeight.w600),
                   ),
                 ],
               ),
@@ -502,23 +606,59 @@ class FrameSelectorService {
 }
 
 class BackendQueueService {
-  BackendQueueService({http.Client? httpClient})
-    : _httpClient = httpClient ?? http.Client();
+  BackendQueueService({
+    required String initialBackendBaseUrl,
+    http.Client? httpClient,
+  }) : _httpClient = httpClient ?? http.Client(),
+       _backendBaseUrl = _normalizeBaseUrl(initialBackendBaseUrl);
 
   final StreamController<QueueEvent> _controller =
       StreamController<QueueEvent>.broadcast();
   final Map<String, QueueJob> _jobs = {};
   final http.Client _httpClient;
+  String _backendBaseUrl;
 
   WebSocketChannel? _channel;
   StreamSubscription<dynamic>? _wsSubscription;
   Timer? _pollTimer;
+  Timer? _reconnectTimer;
+  bool _wsConnected = false;
+  bool _pollStarted = false;
   bool _disposed = false;
 
+  String get backendBaseUrl => _backendBaseUrl;
+  bool get isWebSocketConnected => _wsConnected;
+
   Stream<QueueEvent> connect() {
-    _connectWebSocket();
-    _startPolling();
+    if (_disposed) {
+      throw StateError('BackendQueueService đã dispose');
+    }
+    scheduleMicrotask(() {
+      unawaited(_connectWebSocket());
+    });
+    if (!_pollStarted) {
+      _startPolling();
+      _pollStarted = true;
+    }
     return _controller.stream;
+  }
+
+  Future<void> reconnect({String? baseUrl}) async {
+    if (_disposed) {
+      throw StateError('BackendQueueService đã dispose');
+    }
+
+    if (baseUrl != null && baseUrl.trim().isNotEmpty) {
+      _backendBaseUrl = _normalizeBaseUrl(baseUrl);
+      _emit('backend.updated', {'base_url': _backendBaseUrl});
+    }
+
+    await _disconnectWebSocket();
+    await _connectWebSocket();
+    if (!_pollStarted) {
+      _startPolling();
+      _pollStarted = true;
+    }
   }
 
   List<QueueJob> get jobs {
@@ -605,20 +745,42 @@ class BackendQueueService {
     }
 
     final payload = _decodeObject(response.body);
-    _applyJobPayload(payload, fallbackJobId: jobId, sourceEvent: 'job.status');
+    _applyJobPayload(
+      payload,
+      fallbackJobId: jobId,
+      sourceEvent: 'poll',
+      emitNormalizedEvent: true,
+    );
   }
 
   void sendPing() {
     final channel = _channel;
-    if (channel == null) {
+    if (channel == null || !_wsConnected) {
       _emit('ws.error', {'message': 'WebSocket chưa kết nối'});
+      unawaited(_connectWebSocket());
       return;
     }
-    channel.sink.add('ping');
+
+    try {
+      channel.sink.add('ping');
+    } on StateError catch (error) {
+      _wsConnected = false;
+      _emit('ws.error', {'message': 'WebSocket đã đóng: $error'});
+      unawaited(_connectWebSocket());
+    } catch (error) {
+      _wsConnected = false;
+      _emit('ws.error', {'message': 'Không gửi được ping: $error'});
+      unawaited(_connectWebSocket());
+    }
   }
 
-  void _connectWebSocket() {
-    _wsSubscription?.cancel();
+  Future<void> _connectWebSocket() async {
+    if (_disposed) {
+      return;
+    }
+
+    _reconnectTimer?.cancel();
+    await _disconnectWebSocket(closeSink: false);
 
     try {
       final channel = WebSocketChannel.connect(_wsUri('/ws/queue'));
@@ -626,15 +788,51 @@ class BackendQueueService {
       _wsSubscription = channel.stream.listen(
         _handleWsMessage,
         onError: (Object error, StackTrace stackTrace) {
+          _wsConnected = false;
           _emit('ws.error', {'message': error.toString()});
+          _scheduleReconnect();
         },
         onDone: () {
+          _wsConnected = false;
           _emit('ws.closed', {'reason': 'closed'});
+          _scheduleReconnect();
         },
       );
+      _wsConnected = true;
+      _emit('ws.connected', {'url': _wsUri('/ws/queue').toString()});
     } catch (e) {
+      _wsConnected = false;
       _emit('ws.error', {'message': e.toString()});
+      _scheduleReconnect();
     }
+  }
+
+  void _scheduleReconnect() {
+    if (_disposed) {
+      return;
+    }
+
+    _reconnectTimer?.cancel();
+    _reconnectTimer = Timer(const Duration(seconds: 2), () {
+      if (_disposed) {
+        return;
+      }
+      unawaited(_connectWebSocket());
+    });
+  }
+
+  Future<void> _disconnectWebSocket({bool closeSink = true}) async {
+    _reconnectTimer?.cancel();
+    final subscription = _wsSubscription;
+    _wsSubscription = null;
+    await subscription?.cancel();
+
+    if (closeSink) {
+      await _channel?.sink.close();
+    }
+
+    _channel = null;
+    _wsConnected = false;
   }
 
   void _startPolling() {
@@ -737,6 +935,7 @@ class BackendQueueService {
     Map<String, dynamic> payload, {
     String? fallbackJobId,
     String sourceEvent = 'job.status',
+    bool emitNormalizedEvent = false,
   }) {
     final jobId =
         _stringFromMap(payload, const ['job_id', 'jobId', 'id']) ??
@@ -762,21 +961,23 @@ class BackendQueueService {
 
     _upsertJob(jobId: jobId, status: status, result: result, error: error);
 
-    _emit('job.status', {
-      'job_id': jobId,
-      'status': statusText,
-      'source': sourceEvent,
-    });
-
-    if (result != null ||
-        status == JobStatus.completed ||
-        status == JobStatus.failed) {
-      _emit('job.result', {
+    if (emitNormalizedEvent) {
+      _emit('job.status', {
         'job_id': jobId,
         'status': statusText,
-        'result': result,
-        'error': error,
+        'source': sourceEvent,
       });
+
+      if (result != null ||
+          status == JobStatus.completed ||
+          status == JobStatus.failed) {
+        _emit('job.result', {
+          'job_id': jobId,
+          'status': statusText,
+          'result': result,
+          'error': error,
+        });
+      }
     }
   }
 
@@ -880,16 +1081,43 @@ class BackendQueueService {
   }
 
   Uri _httpUri(String path) {
-    return Uri(
-      scheme: 'http',
-      host: kBackendIp,
-      port: kBackendPort,
-      path: path,
+    final normalizedPath = path.startsWith('/') ? path.substring(1) : path;
+    final base = Uri.parse(
+      _backendBaseUrl.endsWith('/') ? _backendBaseUrl : '$_backendBaseUrl/',
     );
+    return base.resolve(normalizedPath);
   }
 
   Uri _wsUri(String path) {
-    return Uri(scheme: 'ws', host: kBackendIp, port: kBackendPort, path: path);
+    final normalizedPath = path.startsWith('/') ? path.substring(1) : path;
+    final httpBase = Uri.parse(_backendBaseUrl);
+    final wsBase = httpBase.replace(
+      scheme: httpBase.scheme.toLowerCase() == 'https' ? 'wss' : 'ws',
+    );
+    final base = Uri.parse(
+      wsBase.toString().endsWith('/') ? '$wsBase' : '$wsBase/',
+    );
+    return base.resolve(normalizedPath);
+  }
+
+  static String _normalizeBaseUrl(String input) {
+    final raw = input.trim();
+    final uri = Uri.parse(raw);
+    if (!uri.hasScheme || !uri.hasAuthority) {
+      throw const FormatException('Backend URL phải có dạng http://host:port');
+    }
+
+    final scheme = uri.scheme.toLowerCase();
+    if (scheme != 'http' && scheme != 'https') {
+      throw const FormatException('Backend URL chỉ hỗ trợ http hoặc https');
+    }
+
+    final normalized = uri.replace(path: '', query: null, fragment: null);
+    var text = normalized.toString();
+    while (text.endsWith('/')) {
+      text = text.substring(0, text.length - 1);
+    }
+    return text;
   }
 
   Map<String, dynamic> _decodeObject(String body) {
@@ -948,8 +1176,8 @@ class BackendQueueService {
   void dispose() {
     _disposed = true;
     _pollTimer?.cancel();
-    _wsSubscription?.cancel();
-    _channel?.sink.close();
+    _reconnectTimer?.cancel();
+    unawaited(_disconnectWebSocket());
     _httpClient.close();
     _controller.close();
   }

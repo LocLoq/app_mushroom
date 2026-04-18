@@ -1,6 +1,6 @@
 # app_mushroom
 
-App Flutter mẫu cho bài toán nhận diện nấm, gọi trực tiếp backend theo luồng từ `server.py`.
+App Flutter cho bài toán nhận diện nấm, gọi trực tiếp backend theo luồng trong `server.py`.
 
 ## Tính năng
 
@@ -20,8 +20,12 @@ App Flutter mẫu cho bài toán nhận diện nấm, gọi trực tiếp backen
 
 ## Cấu hình backend
 
-- Sửa hằng số `kBackendIp` trong `lib/app.dart` để trỏ tới IP backend của bạn.
-- Port mặc định là `8000` (hằng số `kBackendPort`).
+- Chạy backend FastAPI trước (file tham chiếu: `server.py`).
+- Trong app, nhập URL backend tại ô **Backend URL** và bấm **Áp dụng & kết nối WS**.
+- Ví dụ:
+	- Android emulator: `http://10.0.2.2:8000`
+	- iOS simulator: `http://127.0.0.1:8000`
+	- Thiết bị thật: `http://<LAN-IP-của-máy-chạy-backend>:8000`
 
 ## Chạy dự án
 
@@ -34,4 +38,4 @@ App Flutter mẫu cho bài toán nhận diện nấm, gọi trực tiếp backen
 	- Lấy nhiều frame mẫu theo timeline video.
 	- Tính điểm chất lượng dựa trên độ nét (gradient) và phơi sáng.
 	- Chọn frame có điểm cao nhất.
-- Khi bạn muốn nối API thật, có thể thay `MockQueueWebSocketService` bằng service gọi HTTP + WebSocket thật, còn UI gần như giữ nguyên.
+- WebSocket có cơ chế tự reconnect khi mất kết nối; app vẫn poll trạng thái job đang chạy định kỳ để giảm rủi ro miss event.
