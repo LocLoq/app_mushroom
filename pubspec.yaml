@@ -13,6 +13,9 @@ dependencies:
   video_thumbnail: ^0.5.3
   video_player: ^2.9.5
   image: ^4.5.4
+  http: ^1.4.0
+  http_parser: ^4.1.2
+  web_socket_channel: ^3.0.3
 
 dev_dependencies:
   flutter_test:

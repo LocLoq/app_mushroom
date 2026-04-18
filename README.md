@@ -1,20 +1,27 @@
 # app_mushroom
 
-App Flutter mẫu cho bài toán nhận diện nấm, tham chiếu luồng từ `server.py` nhưng hiện tại chưa gọi API thật.
+App Flutter mẫu cho bài toán nhận diện nấm, gọi trực tiếp backend theo luồng từ `server.py`.
 
 ## Tính năng
 
 - Upload ảnh từ thư viện.
 - Chụp ảnh trực tiếp bằng camera.
 - Quay video bằng camera và tự động chọn frame có chất lượng tốt nhất trước khi đưa vào hàng chờ.
-- Hàng chờ xử lý job theo thứ tự FIFO (mô phỏng local).
-- WebSocket event mô phỏng để theo dõi queue realtime (`queue.snapshot`, `queue.status`, `job.status`, `job.result`, `pong`).
+- Upload ảnh thật qua API `POST /api/images/upload` để tạo job.
+- Theo dõi trạng thái qua WebSocket `ws://<backend-ip>:8000/ws/queue`.
+- Poll trạng thái job qua `GET /api/jobs/{job_id}` làm đường dự phòng.
 
-## Cách hoạt động (mock)
+## Cách hoạt động
 
-- App chưa gọi endpoint `/api/images/upload` hay `/api/jobs/{job_id}`.
-- Dữ liệu ảnh/frame được xử lý local để giả lập kết quả nhận diện (`nam_huong`, `nam_kim_cham`).
-- Event queue được phát qua stream nội bộ theo định dạng tương tự server.
+- Chọn ảnh từ thư viện, camera, hoặc trích frame tốt nhất từ video.
+- Gửi ảnh lên backend bằng multipart/form-data với field `file`.
+- Nhận `job_id` và cập nhật tiến trình theo realtime event (`queue.snapshot`, `queue.status`, `job.status`, `job.result`).
+- Nếu WS gián đoạn hoặc chưa có event, app vẫn poll trạng thái job định kỳ.
+
+## Cấu hình backend
+
+- Sửa hằng số `kBackendIp` trong `lib/app.dart` để trỏ tới IP backend của bạn.
+- Port mặc định là `8000` (hằng số `kBackendPort`).
 
 ## Chạy dự án
 
