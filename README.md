@@ -4,12 +4,15 @@ App Flutter cho bài toán nhận diện nấm, gọi trực tiếp backend theo
 
 ## Tính năng
 
-- Upload ảnh từ thư viện.
-- Chụp ảnh trực tiếp bằng camera.
-- Quay video bằng camera và tự động chọn frame có chất lượng tốt nhất trước khi đưa vào hàng chờ.
-- Upload ảnh thật qua API `POST /api/images/upload` để tạo job.
-- Theo dõi trạng thái qua WebSocket `ws://<backend-ip>:8000/ws/queue`.
-- Poll trạng thái job qua `GET /api/jobs/{job_id}` làm đường dự phòng.
+- Menu chính gồm 4 mục:
+	- **Bắt đầu nhận diện**
+	- **Xem danh sách nấm**
+	- **Cài đặt**
+	- **Giới thiệu**
+- API danh mục nấm: `GET /api/mushrooms/catalog`.
+- API upload ảnh tạo job: `POST /api/images/upload`.
+- API trạng thái job: `GET /api/jobs/{job_id}`.
+- WebSocket hàng chờ: `ws://<backend-ip>:8000/ws/queue`.
 
 ## Cách hoạt động
 
@@ -21,10 +24,9 @@ App Flutter cho bài toán nhận diện nấm, gọi trực tiếp backend theo
 ## Cấu hình backend
 
 - Chạy backend FastAPI trước (file tham chiếu: `server.py`).
-- Khi mở app, trạng thái mặc định là **WS: disconnected** (không tự kết nối).
-- Trong app, nhập URL backend tại ô **Backend URL** rồi bấm **Kết nối WebSocket**.
-- Muốn đổi IP/URL backend: bấm **Disconnect** trước, sau đó sửa URL và kết nối lại.
-- Ví dụ:
+- Mở app, vào **Cài đặt** để nhập URL backend và kết nối WebSocket.
+- Sau khi cấu hình xong, quay về menu và vào **Bắt đầu nhận diện** để gửi ảnh/video.
+- Ví dụ URL backend:
 	- Android emulator: `http://10.0.2.2:8000`
 	- iOS simulator: `http://127.0.0.1:8000`
 	- Thiết bị thật: `http://<LAN-IP-của-máy-chạy-backend>:8000`
